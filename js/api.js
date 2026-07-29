@@ -1,5 +1,62 @@
 import { supabase } from "./supabase.js";
 
+// The users table is looked up (for alias/browser/platform) by almost
+// every function on this page. Rather than re-querying the whole table
+// each time, cache it briefly and share it. Call invalidateUserCache()
+// after any action that changes user data (e.g. renaming an alias) if you
+// need the next lookup to be fresh immediately.
+const USER_MAP_TTL_MS = 30000;
+let userMapCache = { data: null, timestamp: 0 };
+
+// Client-side aggregation (getTopUsers, getTopEvents, getEventsPerDay)
+// pulls raw rows and counts them in JS. Capping the row count keeps a
+// large table from freezing the browser on a single page load. If the
+// table regularly exceeds this, move the aggregation server-side
+// (a Postgres RPC / view) instead of raising this number.
+const AGGREGATION_ROW_LIMIT = 5000;
+
+export function invalidateUserCache() {
+    userMapCache = { data: null, timestamp: 0 };
+}
+
+async function getUserMap() {
+
+    const now = Date.now();
+
+    if (userMapCache.data && (now - userMapCache.timestamp) < USER_MAP_TTL_MS) {
+        return userMapCache.data;
+    }
+
+    const { data, error } = await supabase
+        .from("users")
+        .select("anonymous_id, alias, browser, platform");
+
+    if (error) {
+
+        console.error(error);
+        // Fall back to whatever we had rather than an empty map, so a
+        // transient error doesn't blank out every alias on screen.
+        return userMapCache.data || {};
+
+    }
+
+    const map = Object.fromEntries(
+        data.map(user => [
+            user.anonymous_id,
+            {
+                alias: user.alias,
+                browser: user.browser,
+                platform: user.platform
+            }
+        ])
+    );
+
+    userMapCache = { data: map, timestamp: now };
+
+    return map;
+
+}
+
 export async function getDashboardStats() {
 
     try {
@@ -9,43 +66,39 @@ export async function getDashboardStats() {
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+        const todayIso = today.toISOString();
 
-        // Total Users
-        const { count: totalUsers } = await supabase
-            .from("users")
-            .select("*", { count: "exact", head: true });
+        // These five counts are independent, so run them concurrently
+        // instead of five sequential round-trips — cuts dashboard load
+        // time roughly 5x on a typical connection.
+        const [
+            totalUsersRes,
+            activeUsersRes,
+            sessionsTodayRes,
+            eventsTodayRes,
+            errorsTodayRes
+        ] = await Promise.all([
+            supabase.from("users").select("*", { count: "exact", head: true }),
+            supabase.from("users").select("*", { count: "exact", head: true })
+                .gte("last_activity", twoMinutesAgo),
+            supabase.from("sessions").select("*", { count: "exact", head: true })
+                .gte("started_at", todayIso),
+            supabase.from("events").select("*", { count: "exact", head: true })
+                .gte("created_at", todayIso),
+            supabase.from("errors").select("*", { count: "exact", head: true })
+                .gte("created_at", todayIso)
+        ]);
 
-        // Active Users
-        const { count: activeUsers } = await supabase
-            .from("users")
-            .select("*", { count: "exact", head: true })
-            .gte("last_activity", twoMinutesAgo);
+        [totalUsersRes, activeUsersRes, sessionsTodayRes, eventsTodayRes, errorsTodayRes]
+            .forEach(res => { if (res.error) console.error(res.error); });
 
-        // Sessions Today
-        const { count: sessionsToday } = await supabase
-            .from("sessions")
-            .select("*", { count: "exact", head: true })
-            .gte("started_at", today.toISOString());
-        console.log("Sessions:", sessionsToday);
-        // Events Today
-        const { count: eventsToday } = await supabase
-            .from("events")
-            .select("*", { count: "exact", head: true })
-            .gte("created_at", today.toISOString());
-        console.log("Events:", eventsToday);
-        // Errors Today
-        const { count: errorsToday } = await supabase
-            .from("errors")
-            .select("*", { count: "exact", head: true })
-            .gte("created_at", today.toISOString());
-        console.log("Errors:", errorsToday);
         return {
 
-            totalUsers: totalUsers || 0,
-            activeUsers: activeUsers || 0,
-            sessionsToday: sessionsToday || 0,
-            eventsToday: eventsToday || 0,
-            errorsToday: errorsToday || 0
+            totalUsers: totalUsersRes.count || 0,
+            activeUsers: activeUsersRes.count || 0,
+            sessionsToday: sessionsTodayRes.count || 0,
+            eventsToday: eventsTodayRes.count || 0,
+            errorsToday: errorsTodayRes.count || 0
 
         };
 
@@ -58,15 +111,21 @@ export async function getDashboardStats() {
     }
 
 }
+
 export async function getRecentActivity() {
 
-    const aliasMap = await getAliasMap();
-
-    const { data, error } = await supabase
-        .from("events")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(10);
+    // Fetch the recent-events query and the user map in parallel — they
+    // don't depend on each other, so there's no reason to serialize them.
+    // (Previously this also fetched a separate alias-only map that was
+    // never used — removed.)
+    const [{ data, error }, userMap] = await Promise.all([
+        supabase
+            .from("events")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(10),
+        getUserMap()
+    ]);
 
     if (error) {
 
@@ -76,46 +135,17 @@ export async function getRecentActivity() {
 
     }
 
-    const userMap = await getUserMap();
+    data.forEach(event => {
 
-data.forEach(event => {
+        const user = userMap[event.anonymous_id];
 
-    const user = userMap[event.anonymous_id];
+        event.alias = user?.alias ?? "-";
+        event.browser = user?.browser ?? "-";
+        event.platform = user?.platform ?? "-";
 
-    event.alias = user?.alias ?? "-";
-    event.browser = user?.browser ?? "-";
-    event.platform = user?.platform ?? "-";
-
-});
+    });
 
     return data;
-
-}
-async function getAliasMap() {
-
-    const { data, error } = await supabase
-        .from("users")
-        .select("anonymous_id, alias");
-
-    if (error) {
-
-        console.error(error);
-
-        return {};
-
-    }
-
-    return Object.fromEntries(
-
-        data.map(user => [
-
-            user.anonymous_id,
-
-            user.alias
-
-        ])
-
-    );
 
 }
 
@@ -164,40 +194,8 @@ export async function getUsers(page = 1, pageSize = 20, search = "") {
     };
 
 }
-async function getUserMap() {
 
-    const { data, error } = await supabase
-        .from("users")
-        .select("anonymous_id, alias, browser, platform");
-
-    if (error) {
-
-        console.error(error);
-
-        return {};
-
-    }
-
-    return Object.fromEntries(
-
-        data.map(user => [
-
-            user.anonymous_id,
-
-            {
-                alias: user.alias,
-                browser: user.browser,
-                platform: user.platform
-            }
-
-        ])
-
-    );
-
-}
 export async function getEvents(page = 1, pageSize = 25, search = "") {
-
-    const aliasMap = await getAliasMap();
 
     let query = supabase
         .from("events")
@@ -213,7 +211,10 @@ export async function getEvents(page = 1, pageSize = 25, search = "") {
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
-    const { data, error, count } = await query.range(from, to);
+    const [{ data, error, count }, userMap] = await Promise.all([
+        query.range(from, to),
+        getUserMap()
+    ]);
 
     if (error) {
 
@@ -230,7 +231,7 @@ export async function getEvents(page = 1, pageSize = 25, search = "") {
 
     data.forEach(event => {
 
-        event.alias = aliasMap[event.anonymous_id] ?? "-";
+        event.alias = userMap[event.anonymous_id]?.alias ?? "-";
 
     });
 
@@ -242,18 +243,20 @@ export async function getEvents(page = 1, pageSize = 25, search = "") {
     };
 
 }
-export async function getSessions(page = 1, pageSize = 25) {
 
-    const aliasMap = await getAliasMap();
+export async function getSessions(page = 1, pageSize = 25) {
 
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
-    const { data, error, count } = await supabase
-        .from("sessions")
-        .select("*", { count: "exact" })
-        .order("started_at", { ascending: false })
-        .range(from, to);
+    const [{ data, error, count }, userMap] = await Promise.all([
+        supabase
+            .from("sessions")
+            .select("*", { count: "exact" })
+            .order("started_at", { ascending: false })
+            .range(from, to),
+        getUserMap()
+    ]);
 
     if (error) {
 
@@ -270,7 +273,7 @@ export async function getSessions(page = 1, pageSize = 25) {
 
     data.forEach(session => {
 
-        session.alias = aliasMap[session.anonymous_id] ?? "-";
+        session.alias = userMap[session.anonymous_id]?.alias ?? "-";
 
     });
 
@@ -285,16 +288,17 @@ export async function getSessions(page = 1, pageSize = 25) {
 
 export async function getErrors(page = 1, pageSize = 25) {
 
-    const userMap = await getUserMap();
-
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
-    const { data, error, count } = await supabase
-        .from("errors")
-        .select("*", { count: "exact" })
-        .order("created_at", { ascending: false })
-        .range(from, to);
+    const [{ data, error, count }, userMap] = await Promise.all([
+        supabase
+            .from("errors")
+            .select("*", { count: "exact" })
+            .order("created_at", { ascending: false })
+            .range(from, to),
+        getUserMap()
+    ]);
 
     if (error) {
 
@@ -309,11 +313,11 @@ export async function getErrors(page = 1, pageSize = 25) {
 
     }
 
-    data.forEach(error => {
+    data.forEach(err => {
 
-        const user = userMap[error.anonymous_id];
+        const user = userMap[err.anonymous_id];
 
-        error.alias = user?.alias ?? "-";
+        err.alias = user?.alias ?? "-";
 
     });
 
@@ -325,6 +329,7 @@ export async function getErrors(page = 1, pageSize = 25) {
     };
 
 }
+
 export async function getEventsPerDay(days = 7) {
 
     const start = new Date();
@@ -335,7 +340,8 @@ export async function getEventsPerDay(days = 7) {
         .from("events")
         .select("created_at")
         .gte("created_at", start.toISOString())
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: true })
+        .limit(AGGREGATION_ROW_LIMIT);
 
     if (error) {
 
@@ -414,13 +420,16 @@ export async function getBrowserStats() {
     }));
 
 }
+
 export async function getTopUsers(limit = 5) {
 
-    const userMap = await getUserMap();
-
-    const { data, error } = await supabase
-        .from("events")
-        .select("anonymous_id");
+    const [{ data, error }, userMap] = await Promise.all([
+        supabase
+            .from("events")
+            .select("anonymous_id")
+            .limit(AGGREGATION_ROW_LIMIT),
+        getUserMap()
+    ]);
 
     if (error) {
 
@@ -456,7 +465,8 @@ export async function getTopEvents(limit = 8) {
 
     const { data, error } = await supabase
         .from("events")
-        .select("event");
+        .select("event")
+        .limit(AGGREGATION_ROW_LIMIT);
 
     if (error) {
 
@@ -486,4 +496,3 @@ export async function getTopEvents(limit = 8) {
         .slice(0, limit);
 
 }
-

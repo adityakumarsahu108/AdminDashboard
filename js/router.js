@@ -5,34 +5,61 @@ import { loadEvents } from "../pages/events.js";
 import { loadErrors } from "../pages/errors.js";
 import { loadSettings } from "../pages/settings.js";
 import { stopAutoRefresh } from "./utils.js";
+import { destroyCharts } from "./charts.js";
+
+const routes = {
+    dashboard: loadDashboard,
+    users: loadUsers,
+    sessions: loadSessions,
+    events: loadEvents,
+    errors: loadErrors,
+    settings: loadSettings
+};
+
+let currentPage = null;
 
 export function navigate(page) {
-    stopAutoRefresh();
-    switch (page) {
 
-        case "dashboard":
-            loadDashboard();
-            break;
+    let target = page;
 
-        case "users":
-            loadUsers();
-            break;
+    if (!routes[target]) {
 
-        case "sessions":
-            loadSessions();
-            break;
+        console.warn(`Unknown route "${page}" — falling back to dashboard`);
+        target = "dashboard";
 
-        case "events":
-            loadEvents();
-            break;
-
-        case "errors":
-            loadErrors();
-            break;
-
-        case "settings":
-            loadSettings();
-            break;
     }
+
+    stopAutoRefresh();
+
+    // Clean up dashboard charts before leaving dashboard
+    if (currentPage === "dashboard" && target !== "dashboard") {
+        destroyCharts();
+    }
+
+    currentPage = target;
+
+    updateActiveNav(target);
+
+    routes[target]();
+
+}
+
+export function getCurrentPage() {
+
+    return currentPage;
+
+}
+
+// UX: keeps the sidebar/nav in sync with whatever page is actually
+// showing, instead of relying on each page to remember to do it. Expects
+// nav links/buttons to carry a `data-page="dashboard"` (etc.) attribute —
+// adjust the selector/attribute name if your markup uses something else.
+function updateActiveNav(page) {
+
+    document.querySelectorAll("[data-page]").forEach(el => {
+
+        el.classList.toggle("active", el.dataset.page === page);
+
+    });
 
 }

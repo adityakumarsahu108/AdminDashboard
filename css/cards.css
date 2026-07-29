@@ -8,7 +8,7 @@
 
     grid-template-columns: repeat(5, 1fr);
 
-    gap: 20px;
+    gap: 18px;
 
     margin: 30px 0;
 
@@ -16,52 +16,126 @@
 
 .card {
 
-    background: #1e293b;
+    background: linear-gradient(180deg, rgba(255,255,255,.035), transparent), #121729;
 
-    border: 1px solid #334155;
+    border: 1px solid rgba(148,163,184,.14);
 
     border-radius: 18px;
 
-    padding: 25px;
+    padding: 22px 24px;
 
-    box-shadow: 0 10px 25px rgba(0,0,0,.25);
+    box-shadow: 0 10px 25px rgba(0,0,0,.35);
 
-    transition: all .25s ease;
+    transition: all .3s cubic-bezier(.2,.7,.3,1);
 
+    position: relative;
+
+    overflow: hidden;
+
+}
+
+.card::before{
+    content:"";
+    position:absolute;
+    top:0; left:0;
+    width:100%; height:2px;
+    background: linear-gradient(90deg, transparent, #8b5cf6, #22d3ee, transparent);
+    background-size: 200% 100%;
+    opacity: 0;
+    transition: opacity .3s ease;
 }
 
 .card:hover {
 
     transform: translateY(-6px);
 
-    border-color: #3b82f6;
+    border-color: rgba(139,92,246,.5);
 
+    box-shadow: 0 20px 40px -10px rgba(139,92,246,.25);
+
+}
+
+.card:hover::before{
+    opacity: 1;
+    animation: scan-x 2s linear infinite;
+}
+
+@keyframes scan-x{
+    0%{ background-position: 200% 0; }
+    100%{ background-position: -200% 0; }
 }
 
 .card-title {
 
-    color: #94a3b8;
+    color: #8b95ab;
 
-    font-size: 14px;
+    font-size: 12.5px;
 
-    font-weight: 500;
+    font-weight: 600;
+
+    text-transform: uppercase;
+
+    letter-spacing: .06em;
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 8px;
 
 }
 
 .card h2 {
 
-    margin: 12px 0;
+    margin: 14px 0 4px;
 
-    font-size: 34px;
+    font-size: 32px;
+
+    font-family: 'JetBrains Mono', monospace;
+
+    font-weight: 600;
 
     color: #ffffff;
+
+    letter-spacing: -0.02em;
+
+    font-variant-numeric: tabular-nums;
 
 }
 
 .card small {
 
-    color: #64748b;
+    color: #545d72;
 
+    font-size: 12.5px;
+
+}
+
+/* Live pulse marker — used on the Active Users card via .card-title::before */
+.card:nth-child(2) .card-title::before{
+    content:"";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #34d399;
+    box-shadow: 0 0 0 0 rgba(52,211,153,.6);
+    animation: live-ping 1.8s ease-out infinite;
+    flex-shrink: 0;
+}
+
+@keyframes live-ping{
+    0%{ box-shadow: 0 0 0 0 rgba(52,211,153,.55); }
+    70%{ box-shadow: 0 0 0 8px rgba(52,211,153,0); }
+    100%{ box-shadow: 0 0 0 0 rgba(52,211,153,0); }
+}
+
+/* Errors card gets a warning tint on hover */
+.card:nth-child(5):hover{
+    border-color: rgba(251,113,133,.5);
+    box-shadow: 0 20px 40px -10px rgba(251,113,133,.2);
+}
+.card:nth-child(5):hover::before{
+    background: linear-gradient(90deg, transparent, #fb7185, #fbbf24, transparent);
 }
 
 /* ===========================
@@ -74,7 +148,7 @@
 
     grid-template-columns: repeat(2, 1fr);
 
-    gap: 24px;
+    gap: 22px;
 
     margin-top: 24px;
 
@@ -86,16 +160,30 @@
 
 .panel {
 
-    background: #1e293b;
+    background: linear-gradient(180deg, rgba(255,255,255,.035), transparent), #121729;
 
-    border: 1px solid #334155;
+    border: 1px solid rgba(148,163,184,.14);
 
     border-radius: 18px;
 
     padding: 24px;
 
-    box-shadow: 0 10px 25px rgba(0,0,0,.25);
+    box-shadow: 0 10px 25px rgba(0,0,0,.35);
 
+    position: relative;
+
+    overflow: hidden;
+
+}
+
+.panel::before{
+    content:"";
+    position:absolute;
+    top:0; left:0;
+    width:100%; height:1px;
+    background: linear-gradient(90deg, transparent, rgba(139,92,246,.6), rgba(34,211,238,.6), transparent);
+    background-size: 200% 100%;
+    animation: scan-x 6s linear infinite;
 }
 
 .panel h3 {
@@ -104,7 +192,17 @@
 
     color: #ffffff;
 
-    font-size: 18px;
+    font-size: 16px;
+
+    font-family: 'Space Grotesk', sans-serif;
+
+    font-weight: 600;
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 10px;
 
 }
 
@@ -136,14 +234,32 @@
 
     justify-content: center;
 
-    background: #1e293b;
+    background: #121729;
 
-    color: #94a3b8;
+    color: #8b95ab;
 
-    font-size: 14px;
+    font-size: 13.5px;
+
+    font-family: 'JetBrains Mono', monospace;
 
     z-index: 5;
 
+    gap: 10px;
+
+}
+
+.chart-loading::before{
+    content:"";
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid rgba(139,92,246,.25);
+    border-top-color: #8b5cf6;
+    animation: spin .8s linear infinite;
+}
+
+@keyframes spin{
+    to{ transform: rotate(360deg); }
 }
 
 /* ===========================
@@ -158,10 +274,19 @@
 
     align-items: center;
 
-    padding: 15px 0;
+    padding: 14px 4px;
 
-    border-bottom: 1px solid #334155;
+    border-bottom: 1px solid rgba(148,163,184,.1);
 
+    transition: background .2s ease;
+
+    border-radius: 8px;
+
+}
+
+.activity-item:hover{
+    background: rgba(139,92,246,.06);
+    padding-left: 10px;
 }
 
 .activity-item:last-child {
@@ -174,21 +299,36 @@
 
     color: #ffffff;
 
+    font-weight: 600;
+
+    font-size: 14.5px;
+
 }
 
 .activity-item small {
 
-    color: #94a3b8;
+    color: #8b95ab;
 
 }
 
 .activity-item span {
 
-    color: #64748b;
+    color: #6d7690;
 
-    font-size: 13px;
+    font-size: 12.5px;
+
+    font-family: 'JetBrains Mono', monospace;
+
+    background: rgba(255,255,255,.03);
+
+    padding: 4px 9px;
+
+    border-radius: 6px;
+
+    border: 1px solid rgba(148,163,184,.1);
 
 }
+
 canvas {
 
     max-width: 100%;
@@ -197,8 +337,17 @@ canvas {
 
 .panel:hover {
 
-    border-color: #3b82f6;
+    border-color: rgba(139,92,246,.4);
 
     transition: .25s;
 
+}
+
+@media (max-width: 1200px){
+    .cards{ grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 700px){
+    .cards{ grid-template-columns: repeat(2, 1fr); }
+    .dashboard-grid{ grid-template-columns: 1fr; }
 }
